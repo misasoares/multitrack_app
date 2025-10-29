@@ -1,0 +1,22 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
+
+// Workaround for AGP 8+ requiring namespace in library modules.
+// Sets namespace from AndroidManifest package for plugins that don't declare it (e.g., some Flutter plugins).
+apply from: "$rootDir/plugins-namespace.gradle"

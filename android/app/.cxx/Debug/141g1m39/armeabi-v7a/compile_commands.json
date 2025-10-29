@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/Users/misael/Documents/misa/multitrack_app/android/app/.cxx/Debug/141g1m39/armeabi-v7a",
+  "command": "/Users/misael/Library/Android/sdk/ndk/29.0.13599879/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=armv7-none-linux-androideabi26 --sysroot=/Users/misael/Library/Android/sdk/ndk/29.0.13599879/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dmultichannel_preview_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -march=armv7-a -mthumb -Wformat -Werror=format-security  -std=c++17 -fno-limit-debug-info  -fPIC -o CMakeFiles/multichannel_preview.dir/multichannel_preview.cpp.o -c /Users/misael/Documents/misa/multitrack_app/android/app/src/main/cpp/multichannel_preview.cpp",
+  "file": "/Users/misael/Documents/misa/multitrack_app/android/app/src/main/cpp/multichannel_preview.cpp"
+}
+]

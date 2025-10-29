@@ -1,0 +1,30 @@
+// Ensures Android library subprojects have a namespace set when using AGP 8+
+allprojects { Project p ->
+    p.plugins.withId("com.android.library") {
+        def androidExt = p.extensions.findByName('android')
+        if (androidExt != null) {
+            // Ensure modern SDK and build tools across library modules
+            try {
+                androidExt.compileSdk = 35
+            } catch (ignored) {}
+            try {
+                androidExt.buildToolsVersion = "34.0.0"
+            } catch (ignored) {}
+            def hasNs = false
+            try {
+                hasNs = androidExt.hasProperty('namespace') && androidExt.namespace != null
+            } catch (ignored) {}
+            if (!hasNs) {
+                def manifestFile = androidExt.sourceSets.main.manifest.srcFile
+                if (manifestFile != null && manifestFile.exists()) {
+                    def manifest = new groovy.util.XmlSlurper().parse(manifestFile)
+                    def pkg = manifest.@package.text()
+                    if (pkg) {
+                        androidExt.namespace = pkg
+                        println("[gradle] Set namespace '${pkg}' for module '${p.name}'")
+                    }
+                }
+            }
+        }
+    }
+}

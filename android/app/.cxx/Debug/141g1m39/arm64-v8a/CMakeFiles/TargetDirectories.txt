@@ -1,0 +1,3 @@
+/Users/misael/Documents/misa/multitrack_app/android/app/.cxx/Debug/141g1m39/arm64-v8a/CMakeFiles/multichannel_preview.dir
+/Users/misael/Documents/misa/multitrack_app/android/app/.cxx/Debug/141g1m39/arm64-v8a/CMakeFiles/edit_cache.dir
+/Users/misael/Documents/misa/multitrack_app/android/app/.cxx/Debug/141g1m39/arm64-v8a/CMakeFiles/rebuild_cache.dir
