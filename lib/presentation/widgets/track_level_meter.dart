@@ -169,7 +169,8 @@ class _SmoothBarPainter extends CustomPainter {
 
     final fillH = (size.height - 4) * ratio;
     if (fillH <= 0) return;
-    final rect = Rect.fromLTWH(2, size.height - 2 - fillH, size.width - 4, fillH);
+    final rect =
+        Rect.fromLTWH(2, size.height - 2 - fillH, size.width - 4, fillH);
     final gradient = LinearGradient(
       begin: Alignment.bottomCenter,
       end: Alignment.topCenter,

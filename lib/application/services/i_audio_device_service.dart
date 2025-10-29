@@ -13,4 +13,18 @@ abstract class IAudioDeviceService {
   Future<void> setTrackPan(int trackIndex, double pan);
   Future<void> playAllTracks(List<Track> tracks);
   Future<void> seekPlayAll(double positionSec);
+  // Optional optimizations (no-op on unsupported platforms)
+  Future<void> prepareTracks(List<Track> tracks);
+  Future<void> setOutputQuality({
+    int? sampleRateHz,
+    int? bitDepth,
+    int? bufferSizeFrames,
+    bool? lowLatency,
+    bool? disableResample,
+    bool? enableDither,
+  });
+  // Optional: query file metadata (sample rate) if supported
+  Future<int?> getFileSampleRateHz(String filePath);
+  // Optional: get recommended buffer size in frames for current device
+  Future<int?> getRecommendedBufferSizeFrames();
 }

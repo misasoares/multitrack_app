@@ -236,6 +236,99 @@ class NativeAudioDeviceService implements IAudioDeviceService {
     }
   }
 
+  @override
+  Future<void> prepareTracks(List<Track> tracks) async {
+    if (tracks.isEmpty) return;
+    if (!Platform.isAndroid) {
+      debugPrint('prepareTracks ignorado: plataforma não suportada');
+      return;
+    }
+    try {
+      final filePaths = tracks.map((t) => t.localFilePath).toList();
+      final outputChannels = tracks.map((t) => t.outputChannel).toList();
+      await _methodChannel.invokeMethod('prepareAllPreview', {
+        'filePaths': filePaths,
+        'outputChannels': outputChannels,
+      });
+      debugPrint('Native prepareAllPreview invoked with ${tracks.length} tracks');
+    } catch (e) {
+      // Se método não existir no nativo, tratamos como no-op
+      debugPrint('Native prepareAllPreview unavailable or error: $e');
+    }
+  }
+
+  @override
+  Future<void> setOutputQuality({
+    int? sampleRateHz,
+    int? bitDepth,
+    int? bufferSizeFrames,
+    bool? lowLatency,
+    bool? disableResample,
+    bool? enableDither,
+  }) async {
+    if (!Platform.isAndroid) {
+      debugPrint('setOutputQuality ignorado: plataforma não suportada');
+      return;
+    }
+    try {
+      await _methodChannel.invokeMethod('setOutputQuality', {
+        if (sampleRateHz != null) 'sampleRateHz': sampleRateHz,
+        if (bitDepth != null) 'bitDepth': bitDepth,
+        if (bufferSizeFrames != null) 'bufferSizeFrames': bufferSizeFrames,
+        if (lowLatency != null) 'lowLatency': lowLatency,
+        if (disableResample != null) 'disableResample': disableResample,
+        if (enableDither != null) 'enableDither': enableDither,
+      });
+      debugPrint('Native setOutputQuality invoked');
+    } catch (e) {
+      // Se não suportado, apenas registra e segue
+      debugPrint('Native setOutputQuality unavailable or error: $e');
+    }
+  }
+
+  @override
+  Future<int?> getFileSampleRateHz(String filePath) async {
+    if (!Platform.isAndroid) {
+      debugPrint('getFileSampleRateHz ignorado: plataforma não suportada');
+      return null;
+    }
+    try {
+      final result = await _methodChannel.invokeMethod<dynamic>(
+        'getFileSampleRateHz',
+        {
+          'filePath': filePath,
+        },
+      );
+      if (result is int) return result;
+      if (result is double) return result.round();
+      return null;
+    } catch (e) {
+      debugPrint('Native getFileSampleRateHz unavailable or error: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<int?> getRecommendedBufferSizeFrames() async {
+    // Apenas Android possui consulta nativa; em outras plataformas retornamos null
+    if (!Platform.isAndroid) {
+      debugPrint('getRecommendedBufferSizeFrames ignorado: plataforma não suportada');
+      return null;
+    }
+    try {
+      final result = await _methodChannel.invokeMethod<dynamic>(
+        'getRecommendedBufferSizeFrames',
+      );
+      if (result is int) return result;
+      if (result is double) return result.round();
+      return null;
+    } catch (e) {
+      // Se não implementado no plugin nativo, retornamos null para permitir fallback no Dart
+      debugPrint('Native getRecommendedBufferSizeFrames unavailable or error: $e');
+      return null;
+    }
+  }
+
   void dispose() {
     _nativeSubscription?.cancel();
     _controller.close();
