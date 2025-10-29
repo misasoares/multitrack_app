@@ -43,3 +43,32 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Additional Flutter/Dart ignores
+.packages
+coverage/
+**/build/
+
+# Android specific
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# iOS/macOS specific
+ios/Pods/
+macos/Pods/
+**/xcuserdata/
+*.xcuserstate
+ios/.symlinks/
+macos/Flutter/ephemeral/
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# Merge leftovers and env files
+*.orig
+*.rej
+.env
+.env.*
