@@ -12,6 +12,7 @@ class Track {
   double pan = 0.0;
   int outputChannel = 0; // O canal de roteamento
   int inputChannel = 0; // Canal de entrada (para gravação/roteamento)
+  bool isMetronome = false; // Define se esta faixa é o metrônomo
 
   Track copyWith({
     String? name,
@@ -20,6 +21,7 @@ class Track {
     double? pan,
     int? outputChannel,
     int? inputChannel,
+    bool? isMetronome,
   }) {
     final t = Track()
       ..id = id
@@ -28,7 +30,8 @@ class Track {
       ..volume = volume ?? this.volume
       ..pan = pan ?? this.pan
       ..outputChannel = outputChannel ?? this.outputChannel
-      ..inputChannel = inputChannel ?? this.inputChannel;
+      ..inputChannel = inputChannel ?? this.inputChannel
+      ..isMetronome = isMetronome ?? this.isMetronome;
     return t;
   }
 }

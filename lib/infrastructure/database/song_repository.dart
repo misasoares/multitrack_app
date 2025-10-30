@@ -29,6 +29,28 @@ class SongRepository {
     });
   }
 
+  // Define, de forma atômica, qual faixa é o metrônomo para uma música.
+  // Se trackId for null, todas as faixas da música ficam com isMetronome=false.
+  Future<void> setMetronomeTrack(int songId, int? trackId) async {
+    await isar.writeTxn(() async {
+      final song = await isar.songs.get(songId);
+      if (song == null) return;
+      await song.tracks.load();
+      if (song.tracks.isEmpty) return;
+
+      final updated = <Track>[];
+      for (final t in song.tracks) {
+        final shouldBeMetro = (trackId != null && t.id == trackId);
+        if (t.isMetronome != shouldBeMetro) {
+          updated.add(t.copyWith(isMetronome: shouldBeMetro));
+        }
+      }
+      if (updated.isNotEmpty) {
+        await isar.tracks.putAll(updated);
+      }
+    });
+  }
+
   Future<void> deleteSong(int songId) async {
     await isar.writeTxn(() async {
       final song = await isar.songs.get(songId);

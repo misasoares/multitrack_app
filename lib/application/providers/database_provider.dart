@@ -4,11 +4,12 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../domain/models/song_model.dart';
 import '../../domain/models/track_model.dart';
+import '../../domain/models/endpoint_model.dart';
 
 final isarProvider = FutureProvider<Isar>((ref) async {
   final dir = await getApplicationDocumentsDirectory();
   final isar = await Isar.open(
-    [SongSchema, TrackSchema],
+    [SongSchema, TrackSchema, EndpointSchema],
     directory: dir.path,
     inspector: false,
   );
