@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'setlist_editor_screen.dart';
+import 'setlist_player_screen.dart';
 import '../../../application/providers/setlists_provider.dart';
 import '../../../application/services/setlist_persistence.dart';
 
@@ -64,9 +65,10 @@ class _StageScreenState extends ConsumerState<StageScreen> {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    // Futuro: abrir setlist para execução/edição
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Setlist: ${s.name}')),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SetlistPlayerScreen(setlist: s),
+                      ),
                     );
                   },
                 ),

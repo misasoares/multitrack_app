@@ -387,20 +387,40 @@ class _SetlistEditorScreenState extends ConsumerState<SetlistEditorScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Criar Setlist'),
-        actions: [
-          IconButton(
-            tooltip: 'Salvar setlist',
-            icon: const Icon(Icons.save_alt),
-            onPressed: _onSaveSetlistPressed,
+        centerTitle: true,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: _isPlaying ? 'Pausar' : 'Reproduzir',
+                  iconSize: 40,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  constraints: const BoxConstraints(minWidth: 60, minHeight: 48),
+                  icon: Icon(
+                    _isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_fill,
+                  ),
+                  onPressed: () =>
+                      _isPlaying ? _pauseTimeline() : _playTimeline(),
+                ),
+                const SizedBox(width: 16),
+                IconButton(
+                  tooltip: 'Salvar setlist',
+                  iconSize: 28,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  constraints: const BoxConstraints(minWidth: 60, minHeight: 48),
+                  icon: const Icon(Icons.save_alt),
+                  onPressed: _onSaveSetlistPressed,
+                ),
+              ],
+            ),
           ),
-          IconButton(
-            tooltip: _isPlaying ? 'Pausar' : 'Reproduzir',
-            icon: Icon(_isPlaying
-                ? Icons.pause_circle_filled
-                : Icons.play_circle_fill),
-            onPressed: () => _isPlaying ? _pauseTimeline() : _playTimeline(),
-          ),
-        ],
+        ),
       ),
       body: Column(
         children: [
