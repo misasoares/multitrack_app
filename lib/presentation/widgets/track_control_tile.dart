@@ -13,8 +13,12 @@ import 'track_level_meter.dart';
 class TrackControlTile extends ConsumerStatefulWidget {
   final Track track;
   final int trackIndex;
+  final int songId;
   const TrackControlTile(
-      {super.key, required this.track, required this.trackIndex});
+      {super.key,
+      required this.track,
+      required this.trackIndex,
+      required this.songId});
 
   @override
   ConsumerState<TrackControlTile> createState() => _TrackControlTileState();
@@ -90,6 +94,59 @@ class _TrackControlTileState extends ConsumerState<TrackControlTile> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // Botão de metrônomo (quadrado com ícone de ampulheta)
+            Consumer(
+              builder: (context, ref, child) {
+                final metronomeTrackId = ref.watch(metronomeTrackIdProvider);
+                final shouldShowButton = metronomeTrackId == null ||
+                    metronomeTrackId == widget.track.id;
+
+                if (!shouldShowButton) {
+                  return const SizedBox(
+                      height: 32); // Espaço reservado quando oculto
+                }
+
+                final isMetronome = metronomeTrackId == widget.track.id;
+
+                return Container(
+                  width: 32,
+                  height: 32,
+                  margin: const EdgeInsets.only(bottom: 4),
+                  child: Material(
+                    color: isMetronome ? Colors.orange : Colors.grey[700],
+                    borderRadius: BorderRadius.circular(4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(4),
+                      onTap: () async {
+                        // Usa operação atômica no repositório para garantir persistência e unicidade
+                        if (isMetronome) {
+                          // Desmarca metrônomo para todas as faixas da música
+                          await ref
+                              .read(songRepositoryProvider)
+                              .setMetronomeTrack(widget.songId, null);
+                          ref.read(metronomeTrackIdProvider.notifier).state =
+                              null;
+                        } else {
+                          // Marca esta faixa como metrônomo e desmarca as demais na mesma transação
+                          await ref
+                              .read(songRepositoryProvider)
+                              .setMetronomeTrack(
+                                  widget.songId, widget.track.id);
+                          ref.read(metronomeTrackIdProvider.notifier).state =
+                              widget.track.id;
+                        }
+                      },
+                      child: Icon(
+                        Icons.hourglass_empty,
+                        size: 18,
+                        color: isMetronome ? Colors.white : Colors.grey[300],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+
             // Cabeçalho com nome
             Text(
               widget.track.name,
