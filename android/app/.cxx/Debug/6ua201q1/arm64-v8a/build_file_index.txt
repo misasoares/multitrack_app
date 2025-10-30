@@ -1,1 +1,0 @@
-/Users/misael/Documents/misa/multitrack_app/android/app/src/main/cpp/CMakeLists.txt

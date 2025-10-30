@@ -57,6 +57,9 @@ android/local.properties
 *.keystore
 *.jks
 
+# Android NDK (CMake/Ninja) build artifacts
+android/app/.cxx/
+
 # iOS/macOS specific
 ios/Pods/
 macos/Pods/
