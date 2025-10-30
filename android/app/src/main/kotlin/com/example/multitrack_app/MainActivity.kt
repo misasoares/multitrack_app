@@ -69,6 +69,7 @@ class MainActivity : FlutterActivity() {
         deviceChannels: Int
     ): Boolean
     private external fun nativeSeekAllPreview(positionSec: Double)
+    private external fun nativeDetectBpmFromWav(filePath: String): DoubleArray
 
     companion object {
         private const val TAG = "MultitrackPreview"
@@ -86,16 +87,14 @@ class MainActivity : FlutterActivity() {
     }
 
     private val deviceCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
-            if (addedDevices == null) return
+        override fun onAudioDevicesAdded(addedDevices: Array<AudioDeviceInfo>) {
             if (addedDevices.any { isUsbAudioOutput(it) }) {
                 Log.d(TAG, "USB output device connected")
                 eventSink?.success("connected")
             }
         }
 
-        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-            if (removedDevices == null) return
+        override fun onAudioDevicesRemoved(removedDevices: Array<AudioDeviceInfo>) {
             if (removedDevices.any { isUsbAudioOutput(it) }) {
                 Log.d(TAG, "USB output device disconnected")
                 eventSink?.success("disconnected")
@@ -134,6 +133,84 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call: MethodCall, result: MethodChannel.Result ->
                 when (call.method) {
+                    "detectBpmFromFile" -> {
+                        try {
+                            val args = call.arguments as? Map<*, *>
+                            val filePath = args?.get("filePath") as? String
+                            if (filePath.isNullOrEmpty()) {
+                                result.error("bad_args", "filePath ausente", null)
+                                return@setMethodCallHandler
+                            }
+                            val isWav = filePath.lowercase().endsWith(".wav")
+                            if (!isWav) {
+                                result.error("unsupported_format", "Apenas WAV PCM16 é suportado para detecção nativa", null)
+                                return@setMethodCallHandler
+                            }
+                            val pair = nativeDetectBpmFromWav(filePath)
+                            val bpm = if (pair.isNotEmpty()) pair[0] else 120.0
+                            val conf = if (pair.size >= 2) pair[1] else 0.3
+                            val resp = HashMap<String, Any>()
+                            resp["bpm"] = bpm
+                            resp["confidence"] = conf
+                            result.success(resp)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "detectBpmFromFile error: ${e.message}", e)
+                            result.error("detect_error", e.message, null)
+                        }
+                    }
+                    "getFileSampleRateHz" -> {
+                        try {
+                            val args = call.arguments as? Map<*, *>
+                            val filePath = args?.get("filePath") as? String
+                            if (filePath.isNullOrEmpty()) {
+                                result.success(null)
+                                return@setMethodCallHandler
+                            }
+                            if (!filePath.lowercase().endsWith(".wav")) {
+                                result.success(null)
+                                return@setMethodCallHandler
+                            }
+                            val f = File(filePath)
+                            if (!f.exists()) {
+                                result.success(null)
+                                return@setMethodCallHandler
+                            }
+                            FileInputStream(f).use { fis ->
+                                val riffHead = ByteArray(12)
+                                val n0 = fis.read(riffHead)
+                                if (n0 < 12) {
+                                    result.success(null); return@setMethodCallHandler
+                                }
+                                val riffId = String(riffHead, 0, 4)
+                                val waveId = String(riffHead, 8, 4)
+                                if (riffId != "RIFF" || waveId != "WAVE") {
+                                    result.success(null); return@setMethodCallHandler
+                                }
+                                var sampleRate = -1
+                                val hdr8 = ByteArray(8)
+                                while (true) {
+                                    val n = fis.read(hdr8)
+                                    if (n < 8) break
+                                    val id = String(hdr8, 0, 4)
+                                    val size = ByteBuffer.wrap(hdr8, 4, 4).order(ByteOrder.LITTLE_ENDIAN).getInt()
+                                    if (id == "fmt ") {
+                                        val fmtBuf = ByteArray(size)
+                                        val m = fis.read(fmtBuf)
+                                        if (m < size) { sampleRate = -1; break }
+                                        val bb = ByteBuffer.wrap(fmtBuf).order(ByteOrder.LITTLE_ENDIAN)
+                                        sampleRate = bb.getInt(4)
+                                        break
+                                    } else {
+                                        fis.skip(size.toLong())
+                                    }
+                                }
+                                if (sampleRate > 0) result.success(sampleRate) else result.success(null)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "getFileSampleRateHz error: ${e.message}", e)
+                            result.success(null)
+                        }
+                    }
                     "seekPlayAll" -> {
                         val args = call.arguments as? Map<*, *>
                         val posSec = (args?.get("positionSec") as? Number)?.toDouble() ?: 0.0
@@ -255,7 +332,7 @@ class MainActivity : FlutterActivity() {
                     "playPreview" -> {
                         val args = call.arguments as? Map<*, *>
                         val filePath = args?.get("filePath") as? String
-                        val outputChannel = (args?.get("outputChannel") as? Int) ?: 0
+                        val outputChannel = ((args?.get("outputChannel") as? Number)?.toInt()) ?: 0
                         lastOutputChannel = outputChannel
 
                         try {

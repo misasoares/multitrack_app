@@ -7,9 +7,23 @@
 #include <vector>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
+#include <string>
+
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "multichannel_preview", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "multichannel_preview", __VA_ARGS__)
+
+// WAV information structure and forward declaration for header parser
+struct WavInfo {
+    int sampleRate = 44100;
+    int channels = 2;
+    int bitsPerSample = 16;
+    int audioFormat = 1; // 1=PCM, 3=IEEE float
+    size_t dataOffset = 0;
+    size_t dataSize = 0;
+};
+static bool parseWavHeader(std::ifstream &ifs, WavInfo &info);
 
 static AAudioStream* gStream = nullptr;
 static std::thread gThread;
@@ -20,38 +34,256 @@ static std::atomic<float> gVolume{1.0f};
 static std::atomic<float> gPan{0.0f};
 static int gDeviceChannels = 2;
 
-struct WavInfo {
-    int sampleRate = 44100;
-    int channels = 2;
-    int bitsPerSample = 16;
-    size_t dataOffset = 0;
-    size_t dataSize = 0;
-};
+// --- BPM detection utilities (simple envelope + autocorrelation) ---
+static bool buildEnvelopeDownsampled(std::ifstream &ifs, const WavInfo &info, std::vector<float> &env, float &envFs) {
+    // Target envelope sampling rate ~200 Hz
+    const float targetFs = 200.0f;
+    const int bytesPerSample = info.bitsPerSample / 8; // 2 for 16-bit, 3 for 24-bit, 4 for float32
+    const int frameBytes = bytesPerSample * info.channels;
+    if (frameBytes <= 0 || info.sampleRate <= 0 || info.dataSize == 0) return false;
+
+    int decim = std::max(1, (int)std::floor((float)info.sampleRate / targetFs));
+    envFs = (float)info.sampleRate / (float)decim;
+
+    const size_t totalFrames = info.dataSize / frameBytes;
+    if (totalFrames < (size_t)info.sampleRate) {
+        // menos de 1s de áudio
+        return false;
+    }
+
+    const size_t chunkFrames = 4096; // frames por chunk
+    std::vector<unsigned char> buffer(chunkFrames * frameBytes);
+    ifs.seekg((std::streamoff)info.dataOffset, std::ios::beg);
+
+    int decimCount = 0;
+    double acc = 0.0;
+    size_t framesProcessed = 0;
+    while (framesProcessed < totalFrames) {
+        const size_t framesToRead = std::min(chunkFrames, totalFrames - framesProcessed);
+        const size_t bytesToRead = framesToRead * frameBytes;
+        ifs.read(reinterpret_cast<char*>(buffer.data()), (std::streamsize)bytesToRead);
+        if (!ifs) break;
+        // process frames
+        const unsigned char* p = buffer.data();
+        for (size_t f = 0; f < framesToRead; ++f) {
+            float mono = 0.0f;
+            if (info.audioFormat == 1 && info.bitsPerSample == 16) {
+                // PCM16
+                const int16_t* s = reinterpret_cast<const int16_t*>(p);
+                int sum = 0;
+                for (int ch = 0; ch < info.channels; ++ch) {
+                    sum += (int)s[ch];
+                }
+                mono = (float)sum / (float)(info.channels * 32768.0f);
+            } else if (info.audioFormat == 1 && info.bitsPerSample == 24) {
+                // PCM24 little-endian
+                const unsigned char* q = p;
+                double sum = 0.0;
+                for (int ch = 0; ch < info.channels; ++ch) {
+                    int b0 = q[0];
+                    int b1 = q[1];
+                    int b2 = q[2];
+                    int v = (b2 << 16) | (b1 << 8) | b0;
+                    if (v & 0x800000) v |= ~0xFFFFFF; // sign extend
+                    sum += (double)v / 8388608.0; // 2^23
+                    q += 3;
+                }
+                mono = (float)(sum / (double)info.channels);
+            } else if (info.audioFormat == 3 && info.bitsPerSample == 32) {
+                // IEEE float32 little-endian
+                const unsigned char* q = p;
+                double sum = 0.0;
+                for (int ch = 0; ch < info.channels; ++ch) {
+                    float fv;
+                    std::memcpy(&fv, q, sizeof(float));
+                    // clamp just in case
+                    if (fv > 1.5f) fv = 1.5f;
+                    if (fv < -1.5f) fv = -1.5f;
+                    sum += (double)fv;
+                    q += 4;
+                }
+                mono = (float)(sum / (double)info.channels);
+            } else {
+                // Unsupported
+                return false;
+            }
+            const float v = std::fabs(mono);
+            acc += v;
+            decimCount++;
+            if (decimCount >= decim) {
+                env.push_back((float)(acc / (double)decim));
+                acc = 0.0;
+                decimCount = 0;
+            }
+            p += frameBytes;
+        }
+        framesProcessed += framesToRead;
+    }
+
+    if (env.size() < (size_t)(envFs * 3)) {
+        // menos de 3s de envelope
+        return false;
+    }
+
+    // Smooth envelope with small moving average (~50 ms)
+    const int w = std::max(1, (int)std::round(envFs * 0.05f));
+    if (w > 1) {
+        std::vector<float> sm(env.size(), 0.0f);
+        double sum = 0.0;
+        for (size_t i = 0; i < env.size(); ++i) {
+            sum += env[i];
+            if (i >= (size_t)w) sum -= env[i - w];
+            sm[i] = (float)(sum / (double)std::min((size_t)w, i + 1));
+        }
+        env.swap(sm);
+    }
+    return true;
+}
+
+static void autocorrelationRange(const std::vector<float> &env, float envFs, int lagMin, int lagMax, double &bestCorr, int &bestLag, double &avgCorr) {
+    // Zero-mean
+    double mean = 0.0;
+    for (float v : env) mean += v;
+    mean /= (double)env.size();
+
+    double var = 0.0;
+    std::vector<float> z(env.size());
+    for (size_t i = 0; i < env.size(); ++i) {
+        float d = env[i] - (float)mean;
+        z[i] = d;
+        var += (double)d * (double)d;
+    }
+    if (var <= 1e-12) { bestCorr = 0.0; bestLag = lagMin; avgCorr = 0.0; return; }
+
+    bestCorr = -1.0; bestLag = lagMin; avgCorr = 0.0;
+    int count = 0;
+    for (int L = lagMin; L <= lagMax; ++L) {
+        const size_t N = z.size() - (size_t)L;
+        if (N <= 10) continue;
+        double num = 0.0;
+        for (size_t i = 0; i < N; ++i) {
+            num += (double)z[i] * (double)z[i + L];
+        }
+        // Normalize by variance part (approx): var is sum(z^2)
+        double corr = num / var;
+        if (corr > bestCorr) { bestCorr = corr; bestLag = L; }
+        avgCorr += corr;
+        count++;
+    }
+    if (count > 0) avgCorr /= (double)count; else avgCorr = 0.0;
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_example_multitrack_1app_MainActivity_nativeDetectBpmFromWav(JNIEnv* env, jobject /*thiz*/, jstring jpath) {
+    const char* cpath = env->GetStringUTFChars(jpath, nullptr);
+    std::string path(cpath ? cpath : "");
+    if (cpath) env->ReleaseStringUTFChars(jpath, cpath);
+
+    double outBpm = 120.0;
+    double outConf = 0.2;
+
+    std::ifstream ifs(path, std::ios::binary);
+    if (!ifs) {
+        LOGE("nativeDetectBpm: cannot open file");
+        jdoubleArray arr = env->NewDoubleArray(2);
+        jdouble vals[2] = { outBpm, outConf };
+        env->SetDoubleArrayRegion(arr, 0, 2, vals);
+        return arr;
+    }
+    WavInfo info;
+    if (!parseWavHeader(ifs, info)) {
+        LOGE("nativeDetectBpm: unsupported or invalid wav header\n");
+        jdoubleArray arr = env->NewDoubleArray(2);
+        jdouble vals[2] = { outBpm, outConf };
+        env->SetDoubleArrayRegion(arr, 0, 2, vals);
+        return arr;
+    }
+    // Support PCM16/PCM24/Float32
+    bool supported = (info.audioFormat == 1 && (info.bitsPerSample == 16 || info.bitsPerSample == 24))
+                     || (info.audioFormat == 3 && info.bitsPerSample == 32);
+    if (!supported) {
+        LOGE("nativeDetectBpm: unsupported wav for BPM (need PCM16/24 or float32)\n");
+        jdoubleArray arr = env->NewDoubleArray(2);
+        jdouble vals[2] = { outBpm, outConf };
+        env->SetDoubleArrayRegion(arr, 0, 2, vals);
+        return arr;
+    }
+
+    std::vector<float> envBuf;
+    float envFs = 200.0f;
+    if (!buildEnvelopeDownsampled(ifs, info, envBuf, envFs)) {
+        LOGE("nativeDetectBpm: failed to build envelope");
+        jdoubleArray arr = env->NewDoubleArray(2);
+        jdouble vals[2] = { outBpm, outConf };
+        env->SetDoubleArrayRegion(arr, 0, 2, vals);
+        return arr;
+    }
+
+    // BPM range: 60..200
+    int lagMax = std::max(1, (int)std::round(envFs * 60.0f / 60.0f));
+    int lagMin = std::max(1, (int)std::round(envFs * 60.0f / 200.0f));
+    if (lagMax <= lagMin + 2) lagMax = lagMin + 3;
+
+    double bestCorr = 0.0, avgCorr = 0.0; int bestLag = lagMin;
+    autocorrelationRange(envBuf, envFs, lagMin, lagMax, bestCorr, bestLag, avgCorr);
+    if (bestLag < 1) bestLag = std::max(1, lagMin);
+    outBpm = 60.0 * (double)envFs / (double)bestLag;
+
+    // Confidence heuristic: ratio of bestCorr to avgCorr
+    if (bestCorr <= 1e-9) outConf = 0.2;
+    else if (avgCorr <= 1e-9) outConf = std::min(1.0, std::max(0.3, bestCorr));
+    else outConf = std::min(1.0, std::max(0.3, bestCorr / std::max(1e-6, avgCorr)));
+
+    jdoubleArray arr = env->NewDoubleArray(2);
+    jdouble vals[2] = { outBpm, outConf };
+    env->SetDoubleArrayRegion(arr, 0, 2, vals);
+    return arr;
+}
 
 static bool parseWavHeader(std::ifstream &ifs, WavInfo &info) {
-    char header[44];
-    ifs.read(header, 44);
-    if (ifs.gcount() < 44) return false;
-    if (std::memcmp(header, "RIFF", 4) != 0 || std::memcmp(header + 8, "WAVE", 4) != 0) return false;
-    auto rd16 = [&](int off) { return *reinterpret_cast<int16_t*>(header + off); };
-    auto rd32 = [&](int off) { return *reinterpret_cast<int32_t*>(header + off); };
-    int audioFormat = rd16(20);
-    info.channels = rd16(22);
-    info.sampleRate = rd32(24);
-    info.bitsPerSample = rd16(34);
-    if (audioFormat != 1 || info.bitsPerSample != 16) return false; // PCM 16
-    // localizar chunk 'data'
-    int pos = 12;
-    while (pos + 8 <= 44) {
-        if (std::memcmp(header + pos, "data", 4) == 0) {
-            info.dataOffset = pos + 8;
-            info.dataSize = rd32(pos + 4);
-            break;
+    // Read RIFF header
+    char riff[12];
+    ifs.seekg(0, std::ios::beg);
+    ifs.read(riff, 12);
+    if (ifs.gcount() < 12) return false;
+    if (std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(riff + 8, "WAVE", 4) != 0) return false;
+
+    bool haveFmt = false;
+    bool haveData = false;
+    while (ifs) {
+        char hdr[8];
+        ifs.read(hdr, 8);
+        if (!ifs || ifs.gcount() < 8) break;
+        int size = *(int32_t*)(hdr + 4);
+        // Ensure little-endian on Android; assuming LE
+        if (std::memcmp(hdr, "fmt ", 4) == 0) {
+            std::vector<char> buf(size);
+            ifs.read(buf.data(), size);
+            if ((int)ifs.gcount() < size) return false;
+            // Parse fmt
+            auto rd16 = [&](int off) { return *(int16_t*)(buf.data() + off); };
+            auto rd32 = [&](int off) { return *(int32_t*)(buf.data() + off); };
+            info.audioFormat = rd16(0);
+            info.channels = rd16(2);
+            info.sampleRate = rd32(4);
+            // byteRate = rd32(8);
+            // blockAlign = rd16(12);
+            if (size >= 16) info.bitsPerSample = rd16(14); else info.bitsPerSample = 0;
+            haveFmt = true;
+        } else if (std::memcmp(hdr, "data", 4) == 0) {
+            std::streampos pos = ifs.tellg();
+            info.dataOffset = (size_t)pos;
+            info.dataSize = (size_t)size;
+            // skip payload to continue scanning if needed
+            ifs.seekg(size, std::ios::cur);
+            haveData = true;
+        } else {
+            // skip unknown chunk
+            ifs.seekg(size, std::ios::cur);
         }
-        int chunkSize = rd32(pos + 4);
-        pos += 8 + chunkSize;
+        if (haveFmt && haveData) break;
     }
-    return info.dataSize > 0;
+    return haveFmt && haveData && info.sampleRate > 0 && info.channels > 0 && info.bitsPerSample > 0 && info.dataSize > 0;
 }
 
 static void closeStream() {
@@ -297,6 +529,10 @@ Java_com_example_multitrack_1app_MainActivity_nativePlayWavPreview(
     WavInfo winfo;
     if (!parseWavHeader(ifs, winfo)) {
         LOGE("wav inválido/unsupported");
+        return JNI_FALSE;
+    }
+    if (!(winfo.audioFormat == 1 && winfo.bitsPerSample == 16)) {
+        LOGE("playWavPreview: only PCM16 supported for playback");
         return JNI_FALSE;
     }
     LOGI("WAV header: rate=%d channels=%d bits=%d dataOffset=%zu dataSize=%zu",
